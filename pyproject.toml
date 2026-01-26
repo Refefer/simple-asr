@@ -1,0 +1,17 @@
+[project]
+name = "simple-asr"
+version = "0.1.0"
+description = "Real-time audio transcription CLI using local Whisper model"
+requires-python = ">=3.10"
+dependencies = [
+    "sounddevice>=0.4.1",
+    "faster-whisper>=1.0.0",
+    "numpy",
+]
+
+[project.scripts]
+simple-asr = "simple_asr.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
