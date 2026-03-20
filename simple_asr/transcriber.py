@@ -52,11 +52,11 @@ class Transcriber:
         )
         print("Model loaded successfully!")
 
-    def transcribe(self, audio: np.ndarray, show_progress: bool = False) -> str:
+    def transcribe(self, audio: np.ndarray | str, show_progress: bool = False) -> str:
         """Transcribe audio data.
 
         Args:
-            audio: Audio data as float32 numpy array (16kHz mono)
+            audio: Audio as float32 numpy array (16kHz mono) or path to audio file
             show_progress: Whether to show partial results
 
         Returns:
@@ -65,10 +65,11 @@ class Transcriber:
         if self.model is None:
             raise RuntimeError("Model not loaded. Call load_model() first.")
 
-        # Check minimum audio length
-        duration = len(audio) / self.SAMPLE_RATE
-        if duration < self.MIN_AUDIO_LENGTH:
-            return ""
+        # Check minimum audio length for raw arrays
+        if isinstance(audio, np.ndarray):
+            duration = len(audio) / self.SAMPLE_RATE
+            if duration < self.MIN_AUDIO_LENGTH:
+                return ""
 
         # Transcribe with VAD filter
         segments, info = self.model.transcribe(

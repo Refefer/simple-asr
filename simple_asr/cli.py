@@ -25,6 +25,8 @@ Examples:
   simple-asr                                    # saves to current directory
   simple-asr --output ./transcripts
   simple-asr --name meeting --output ./transcripts
+  simple-asr --file recording.wav
+  simple-asr --file recording.mp3 --output ./transcripts
         """
     )
     parser.add_argument(
@@ -37,6 +39,11 @@ Examples:
         default=".",
         type=Path,
         help="Output directory for transcription files"
+    )
+    parser.add_argument(
+        "--file", "-f",
+        type=Path,
+        help="Audio file to transcribe (skips interactive recording)"
     )
     return parser.parse_args()
 
@@ -144,15 +151,43 @@ class Application:
         print("\nGoodbye!")
 
 
+def transcribe_file(file_path: Path, name: str, output_dir: Path):
+    """Transcribe an audio file and save the result."""
+    if not file_path.is_file():
+        print(f"Error: File not found: {file_path}", file=sys.stderr)
+        sys.exit(1)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    transcriber = Transcriber()
+    transcriber.load_model()
+
+    print(f"\nTranscribing: {file_path}")
+    text = transcriber.transcribe(str(file_path), show_progress=True)
+
+    if text.strip():
+        filepath = get_next_filename(output_dir, name)
+        filepath.write_text(text.strip() + "\n")
+        print(f"\n\nTranscription:")
+        print("-" * 40)
+        print(text)
+        print("-" * 40)
+        print(f"Saved to: {filepath}")
+    else:
+        print("\nNo speech detected.")
+
+
 def main():
     """Entry point."""
     args = parse_args()
 
-    app = Application(args.name, args.output)
-
     try:
-        app.setup()
-        app.run()
+        if args.file:
+            transcribe_file(args.file, args.name, args.output)
+        else:
+            app = Application(args.name, args.output)
+            app.setup()
+            app.run()
     except KeyboardInterrupt:
         print("\nInterrupted.")
         sys.exit(0)
