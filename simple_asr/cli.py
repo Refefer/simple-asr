@@ -1,7 +1,9 @@
 """Command-line interface for simple-asr."""
 
 import argparse
+import shlex
 import signal
+import subprocess
 import sys
 from pathlib import Path
 
@@ -15,8 +17,33 @@ class HelpFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescript
     pass
 
 
+def extract_exec(argv: list[str]) -> tuple[list[str], list[str] | None]:
+    """Pull a find-style ``--exec CMD ... ;`` clause out of argv.
+
+    Returns the remaining argv (with the clause removed) and the command
+    template, or ``None`` if ``--exec`` was not present.
+    """
+    try:
+        i = argv.index("--exec")
+    except ValueError:
+        return argv, None
+
+    try:
+        end = argv.index(";", i + 1)
+    except ValueError:
+        raise SystemExit("error: --exec must be terminated with ';' (escape as \\; in the shell)")
+
+    cmd = argv[i + 1:end]
+    if not cmd:
+        raise SystemExit("error: --exec requires a command before ';'")
+
+    return argv[:i] + argv[end + 1:], cmd
+
+
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
+    argv, exec_cmd = extract_exec(sys.argv[1:])
+
     parser = argparse.ArgumentParser(
         description="Real-time audio transcription using local Whisper model",
         formatter_class=HelpFormatter,
@@ -27,6 +54,11 @@ Examples:
   simple-asr --name meeting --output ./transcripts
   simple-asr --file recording.wav
   simple-asr --file recording.mp3 --output ./transcripts
+  simple-asr --exec wc -l {} \\;                 # run wc on each saved transcript
+
+--exec CMD ... ;
+  Run CMD on each saved transcript file. '{}' is replaced with the file
+  path. The clause must be terminated with ';' (use '\\;' in the shell).
         """
     )
     parser.add_argument(
@@ -45,15 +77,31 @@ Examples:
         type=Path,
         help="Audio file to transcribe (skips interactive recording)"
     )
-    return parser.parse_args()
+    args = parser.parse_args(argv)
+    args.exec_cmd = exec_cmd
+    return args
+
+
+def run_exec(cmd_template: list[str], file_path: Path) -> None:
+    """Run an exec command template, substituting ``{}`` with the file path."""
+    cmd = [arg.replace("{}", str(file_path)) for arg in cmd_template]
+    print(f"Running --exec: {shlex.join(cmd)}", flush=True)
+    try:
+        result = subprocess.run(cmd, check=False)
+        print(f"--exec finished: exit code {result.returncode}")
+    except FileNotFoundError:
+        print(f"\nError: --exec command not found: {cmd[0]}", file=sys.stderr)
+    except OSError as e:
+        print(f"\nError running --exec: {e}", file=sys.stderr)
 
 
 class Application:
     """Main application controller."""
 
-    def __init__(self, name: str, output_dir: Path):
+    def __init__(self, name: str, output_dir: Path, exec_cmd: list[str] | None = None):
         self.name = name
         self.output_dir = output_dir
+        self.exec_cmd = exec_cmd
         self.recorder = AudioRecorder()
         self.transcriber = Transcriber()
         self.running = True
@@ -138,6 +186,8 @@ class Application:
                                 print(text)
                                 print("-" * 40)
                                 print(f"Saved to: {filepath}")
+                                if self.exec_cmd:
+                                    run_exec(self.exec_cmd, filepath)
                             else:
                                 print("\nNo speech detected.")
                         else:
@@ -151,7 +201,7 @@ class Application:
         print("\nGoodbye!")
 
 
-def transcribe_file(file_path: Path, name: str, output_dir: Path):
+def transcribe_file(file_path: Path, name: str, output_dir: Path, exec_cmd: list[str] | None = None):
     """Transcribe an audio file and save the result."""
     if not file_path.is_file():
         print(f"Error: File not found: {file_path}", file=sys.stderr)
@@ -173,6 +223,8 @@ def transcribe_file(file_path: Path, name: str, output_dir: Path):
         print(text)
         print("-" * 40)
         print(f"Saved to: {filepath}")
+        if exec_cmd:
+            run_exec(exec_cmd, filepath)
     else:
         print("\nNo speech detected.")
 
@@ -183,9 +235,9 @@ def main():
 
     try:
         if args.file:
-            transcribe_file(args.file, args.name, args.output)
+            transcribe_file(args.file, args.name, args.output, args.exec_cmd)
         else:
-            app = Application(args.name, args.output)
+            app = Application(args.name, args.output, args.exec_cmd)
             app.setup()
             app.run()
     except KeyboardInterrupt:
